@@ -14,7 +14,7 @@ https://www.pythonguis.com/faq/file-image-browser-app-with-thumbnails/
 _DEBUG = False
 
 DATABASE = 'sqlite.db'
-NUMBER_OF_COLUMNS = 8
+NUMBER_OF_COLUMNS = 10
 CELLSIZE_HEIGHT = 200
 CELLSIZE_WIDTH = 170
 CELLMARGIN = 8
