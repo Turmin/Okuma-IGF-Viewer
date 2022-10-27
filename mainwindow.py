@@ -116,14 +116,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.tableWidget.insertRow(self.tableWidget.rowCount())
                 curColumn = 0
             curRow = self.tableWidget.rowCount()-1
-            if thumbs_path is not None and thumbs_filename is not None:
-                image = f'{thumbs_path}\{thumbs_filename}'
-            else:
-                image = os.path.join(os.path.dirname(__file__), 'images\\no-image.png')
-            if pdf_path is not None and pdf_filename is not None:
-                pdf = f'{pdf_path}\{pdf_filename}'
-            else:
-                pdf = None
+            image = f'{thumbs_path}\{thumbs_filename}' if thumbs_path is not None and thumbs_filename is not None else None
+            pdf = f'{pdf_path}\{pdf_filename}' if pdf_path is not None and pdf_filename is not None else None
             self.tableWidget.setCellWidget(curRow, curColumn, cellWidgets({'thumbnail':image,'igf_basename':igf_basename,'pdf':pdf}))
             curColumn += 1
 
@@ -258,45 +252,41 @@ class cellWidgets(QtWidgets.QWidget):
     def __init__(self, data=None, parent=None):
         super(cellWidgets,self).__init__(parent)
 
-        if data['thumbnail'] is None and data['pdf'] is None:
-            bn = data['igf_basename']
-            print(f'{bn} has no pdf and image ')
-        if data['thumbnail'] is not None or data['pdf'] is not None:
-            layout = QtWidgets.QVBoxLayout()
+        # if data['pdf'] is not None or data['thumbnail'] is not None:
+        layout = QtWidgets.QVBoxLayout()
 
-            layout.setContentsMargins(CELLMARGIN, CELLMARGIN, CELLMARGIN, CELLMARGIN)
-            layout.setSpacing(0)
-            if data['thumbnail'] is not None:
-                labelImage = QtWidgets.QLabel()
-                labelImage.setScaledContents(True)
-                im = QPixmap(data['thumbnail']).scaled(200, 200, Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation)
-                labelImage.setPixmap(im)
-                image = data['thumbnail']
-                labelImage.mousePressEvent = lambda event, image=image: self.imageClicked(event, image)
-                layout.addWidget(labelImage)
+        layout.setContentsMargins(CELLMARGIN, CELLMARGIN, CELLMARGIN, CELLMARGIN)
+        layout.setSpacing(0)
+        labelImage = QtWidgets.QLabel()
+        labelImage.setScaledContents(True)
+        image = data['thumbnail'] if data['thumbnail'] is not None else os.path.join(os.path.dirname(__file__), 'images\\no-image.png')
+        im = QPixmap(image).scaled(200, 200, Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation)
+        labelImage.setPixmap(im)
+        labelImage.mousePressEvent = lambda event, image=image: self.imageClicked(event, image)
+        layout.addWidget(labelImage)
 
-            """
-            text_input = QtWidgets.QTextEdit()
-            text_input.setSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
-            text_input.setFixedHeight(45)
-            text_input.setFont(QFont('Arial',10))
-            text_input.textChanged.connect(lambda *args, data=data: self.saveText(data))
-            layout.addWidget(text_input)
-            """
+        """
+        text_input = QtWidgets.QTextEdit()
+        text_input.setSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
+        text_input.setFixedHeight(45)
+        text_input.setFont(QFont('Arial',10))
+        text_input.textChanged.connect(lambda *args, data=data: self.saveText(data))
+        layout.addWidget(text_input)
+        """
 
-            button = QtWidgets.QPushButton(data['igf_basename'])
-            button.setSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
-            button.setFixedHeight(25)
-            button.setFont(QFont('Arial',10))
-            button.setStyleSheet("QPushButton{background-color:#145060;color:#fff}")
-            if data['pdf'] is not None:
-                button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons/icons8-pdf-48.png')))
-                button.clicked.connect(lambda *args, pdf=data['pdf']: self.buttonClicked(pdf))
-                button.setStyleSheet("QPushButton{background-color:#145060;color:#fff}" "QPushButton::hover{background-color:#063970}")
-                button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-            layout.addWidget(button)
+        button = QtWidgets.QPushButton(data['igf_basename'])
+        button.setSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
+        button.setFixedHeight(25)
+        button.setFont(QFont('Arial',10))
+        button.setStyleSheet("QPushButton{background-color:#004875;color:#fff}")
+        if data['pdf'] is not None:
+            button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons/icons8-pdf-48.png')))
+            button.clicked.connect(lambda *args, pdf=data['pdf']: self.buttonClicked(pdf))
+            button.setStyleSheet("QPushButton{background-color:#004875;color:#fff}" "QPushButton::hover{background-color:#14243c}")
+            button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        layout.addWidget(button)
 
-            self.setLayout(layout)
+        self.setLayout(layout)
 
     def imageClicked(self, event, image):
         try:
