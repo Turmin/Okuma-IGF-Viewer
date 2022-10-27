@@ -161,7 +161,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def openDatabaseViewer(self):        
         from viewer import databaseViewer
-        self.winDatabaseViewer = databaseViewer({'dbname':'sqlite.db', 'table':'igf'})
+        self.winDatabaseViewer = databaseViewer({'dbname':DATABASE, 'table':'igf'})
         self.winDatabaseViewer.show()
 
     def contextMenu(self, point):
