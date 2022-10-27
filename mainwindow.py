@@ -258,38 +258,45 @@ class cellWidgets(QtWidgets.QWidget):
     def __init__(self, data=None, parent=None):
         super(cellWidgets,self).__init__(parent)
 
-        layout = QtWidgets.QVBoxLayout()
+        if data['thumbnail'] is None and data['pdf'] is None:
+            bn = data['igf_basename']
+            print(f'{bn} has no pdf and image ')
+        if data['thumbnail'] is not None or data['pdf'] is not None:
+            layout = QtWidgets.QVBoxLayout()
 
-        layout.setContentsMargins(CELLMARGIN, CELLMARGIN, CELLMARGIN, CELLMARGIN)
-        layout.setSpacing(0)
-        # print(data['thumbnail'])
-        if data['thumbnail'] is not None:
-            labelImage = QtWidgets.QLabel()
-            labelImage.setScaledContents(True)
-            im = QPixmap(data['thumbnail']).scaled(200, 200, Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation)
-            labelImage.setPixmap(im)
-            image = data['thumbnail']
-            labelImage.mousePressEvent = lambda event, image=image: self.imageClicked(event, image)
-            layout.addWidget(labelImage)
+            layout.setContentsMargins(CELLMARGIN, CELLMARGIN, CELLMARGIN, CELLMARGIN)
+            layout.setSpacing(0)
+            if data['thumbnail'] is not None:
+                labelImage = QtWidgets.QLabel()
+                labelImage.setScaledContents(True)
+                im = QPixmap(data['thumbnail']).scaled(200, 200, Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation)
+                labelImage.setPixmap(im)
+                image = data['thumbnail']
+                labelImage.mousePressEvent = lambda event, image=image: self.imageClicked(event, image)
+                layout.addWidget(labelImage)
 
-        """
-        text_input = QtWidgets.QTextEdit()
-        text_input.setSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
-        text_input.setFixedHeight(45)
-        text_input.setFont(QFont('Arial',10))
-        text_input.textChanged.connect(lambda *args, data=data: self.saveText(data))
-        layout.addWidget(text_input)
-        """
+            """
+            text_input = QtWidgets.QTextEdit()
+            text_input.setSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
+            text_input.setFixedHeight(45)
+            text_input.setFont(QFont('Arial',10))
+            text_input.textChanged.connect(lambda *args, data=data: self.saveText(data))
+            layout.addWidget(text_input)
+            """
 
-        button = QtWidgets.QPushButton(data['igf_basename'])
-        button.setSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
-        button.setFixedHeight(25)
-        button.setFont(QFont('Arial',10))
-        button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons/icons8-pdf-48.png')))
-        button.clicked.connect(lambda *args, pdf=data['pdf']: self.buttonClicked(pdf))
-        layout.addWidget(button)
+            button = QtWidgets.QPushButton(data['igf_basename'])
+            button.setSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
+            button.setFixedHeight(25)
+            button.setFont(QFont('Arial',10))
+            button.setStyleSheet("QPushButton{background-color:#145060;color:#fff}")
+            if data['pdf'] is not None:
+                button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons/icons8-pdf-48.png')))
+                button.clicked.connect(lambda *args, pdf=data['pdf']: self.buttonClicked(pdf))
+                button.setStyleSheet("QPushButton{background-color:#145060;color:#fff}" "QPushButton::hover{background-color:#063970}")
+                button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+            layout.addWidget(button)
 
-        self.setLayout(layout)
+            self.setLayout(layout)
 
     def imageClicked(self, event, image):
         try:

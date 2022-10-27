@@ -1,83 +1,13 @@
-import sys, os, sqlite3, configparser, glob, qdarktheme, re, traceback
-from pathlib import Path, PurePath
+import sys, os, sqlite3, configparser, glob, qdarktheme, re
+from pathlib import PurePath
 from sqlite3 import Error
 from PyQt6 import QtWidgets, uic
-from PyQt6.QtGui import *
-from PyQt6.QtCore import QObject, pyqtSignal, QRunnable, pyqtSlot, QTimer, QThreadPool
 from datetime import datetime
 
 # _DEBUG = True
 _DEBUG = False
 
-
-class WorkerSignals(QObject):
-    '''
-    Defines the signals available from a running worker thread.
-
-    Supported signals are:
-
-    finished
-        No data
-
-    error
-        tuple (exctype, value, traceback.format_exc() )
-
-    result
-        object data returned from processing, anything
-
-    progress
-        int indicating % progress
-
-    '''
-    finished = pyqtSignal()
-    error = pyqtSignal(tuple)
-    result = pyqtSignal(object)
-    progress = pyqtSignal(int)
-
-class Worker(QRunnable):
-    '''
-    Worker thread
-
-    Inherits from QRunnable to handler worker thread setup, signals and wrap-up.
-
-    :param callback: The function callback to run on this worker thread. Supplied args and
-                     kwargs will be passed through to the runner.
-    :type callback: function
-    :param args: Arguments to pass to the callback function
-    :param kwargs: Keywords to pass to the callback function
-
-    '''
-
-    def __init__(self, fn, *args, **kwargs):
-        super(Worker, self).__init__()
-
-        # Store constructor arguments (re-used for processing)
-        self.fn = fn
-        self.args = args
-        self.kwargs = kwargs
-        self.signals = WorkerSignals()
-
-        # Add the callback to our kwargs
-        self.kwargs['progress_callback'] = self.signals.progress
-
-    @pyqtSlot()
-    def run(self):
-        '''
-        Initialise the runner function with passed args, kwargs.
-        '''
-
-        # Retrieve args/kwargs here; and fire processing using them
-        try:
-            result = self.fn(*self.args, **self.kwargs)
-        except:
-            traceback.print_exc()
-            exctype, value = sys.exc_info()[:2]
-            self.signals.error.emit((exctype, value, traceback.format_exc()))
-        else:
-            self.signals.result.emit(result)  # Return the result of the processing
-        finally:
-            self.signals.finished.emit()  # Done
-
+DATABASE = "sqlite.db"
 
 class winUpdate(QtWidgets.QMainWindow):
 
@@ -106,35 +36,6 @@ class winUpdate(QtWidgets.QMainWindow):
         except Exception as e:
             print('Error' , e)
 
-    """
-        self.threadpool = QThreadPool()
-        print("Multithreading with maximum %d threads" % self.threadpool.maxThreadCount())
-
-        self.startWorker()
-
-    def progress_fn(self, n):
-        print("%d%% done" % n)
-
-    def execute_this_fn(self, progress_callback):
-        for n in range(0, 5):
-            time.sleep(1)
-            progress_callback.emit(n*100/4)
-
-        return "Done."
-
-    def print_output(self, s):
-        print(s)
-
-    def thread_complete(self):
-        print("THREAD COMPLETE!")
-
-    def startWorker(self):
-        worker = Worker(self.execute_this_fn) # Any other args, kwargs are passed to the run function
-        worker.signals.result.connect(self.print_output)
-        worker.signals.finished.connect(self.thread_complete)
-        worker.signals.progress.connect(self.progress_fn)
-        self.threadpool.start(worker)
-    """
     def browse(self, type):
         try:
             config = configparser.ConfigParser()
@@ -145,7 +46,7 @@ class winUpdate(QtWidgets.QMainWindow):
                 case 'IGF':
                     savedPath = config['DEFAULT']['IGFBackupPath'] if config.has_option('DEFAULT','IGFBackupPath') == True else 'C:/'
                 case 'PDF':
-                    savedPath = config['DEFAULT']['PDFPath'] if config.has_option('DEFAULT','PDFPath') == True else '//srv-w2012-cad/ME10_data$/data/code_tekeningen'
+                    savedPath = config['DEFAULT']['PDFPath'] if config.has_option('DEFAULT','PDFPath') == True else '//srv-w2012-cad/ME10_data$/data/pdf/code'
                 case 'Thumbnail':
                     savedPath = config['DEFAULT']['ThumbnailPath'] if config.has_option('DEFAULT','ThumbnailPath') == True else '//srv-w2012-cad/ME10_data$/data/Thumbnail_3D/code'
 
@@ -170,6 +71,7 @@ class winUpdate(QtWidgets.QMainWindow):
 
     def accepted(self):
         self.buttonBox.button(QtWidgets.QDialogButtonBox.StandardButton.Ok).setEnabled(False)
+        QtWidgets.QApplication.processEvents()
 
         pathIGF = self.leIGF.text()
         pathPDF = self.lePDF.text()
@@ -184,11 +86,10 @@ class winUpdate(QtWidgets.QMainWindow):
         if os.path.isdir(pathThumbnail) == False:
             return self.plainTextEdit.appendPlainText(f'{PurePath(pathThumbnail).name}\nHet pad bestaat niet. Controleer het pad en probeer het opnieuw.')
 
-        database = r"sqlite.db"
-        if os.path.isfile(os.path.join('.', database)):
+        if os.path.isfile(os.path.join('.', DATABASE)):
             try:
                 dt = datetime.now().strftime("%Y%m%d%H%M%S")
-                os.rename(os.path.join('.', database), os.path.join('.',f'sqlite{dt}.db'))
+                os.rename(os.path.join('.', DATABASE), os.path.join('.',f'sqlite{dt}.db'))
             except Exception as e:
                 print(e)
                 return self.plainTextEdit.appendPlainText('Kan database niet hernoemen.')
@@ -225,51 +126,13 @@ class winUpdate(QtWidgets.QMainWindow):
                                         folder varchar(255) NOT NULL
                                     );"""
 
-        conn = self.create_connection(database)
+        conn = self.create_connection(DATABASE)
 
         if conn is not None:
             self.create_table(conn, sql_create_igf_table)
             self.create_table(conn, sql_create_pdf_table)
             self.create_table(conn, sql_create_thumbs_table)
             self.create_table(conn, sql_create_info_table)
-
-            """
-            Create dictionary of PDF files
-            """
-            pdf_list = []
-            for n, fn in enumerate(glob.glob(pathPDF + '/**/*.pdf', recursive=True)):
-                pp = PurePath(fn)
-                filename = pp.name
-                found = re.search(r'\d{7,}', filename)
-                if(found is not None):
-                    basename = pp.stem
-                    mm = found.group()
-                    path = pp.parent
-                    pdf_list.append((filename, basename, str(mm), str(path)))
-            res = self.insertPDF(conn, pdf_list)
-            if(res):
-                if(res.rowcount > 0):
-                    self.plainTextEdit.appendPlainText(f'{res.rowcount} PDF files toegevoegd.')
-            self.progressBar.setValue(33)
-
-            """
-            Create dictionary of thumbnails
-            """
-            thumbnail_list = []
-            for n, fn in enumerate(glob.glob(pathThumbnail + '/**/*.jpg', recursive=True)):
-                pp = PurePath(fn)
-                filename = pp.name
-                found = re.search(r'\d{7,}', filename)
-                if(found is not None):
-                    basename = pp.stem
-                    mm = found.group()
-                    path = pp.parent
-                    thumbnail_list.append((filename, basename, str(mm), str(path)))
-            res = self.insertThumbs(conn, thumbnail_list)
-            if(res):
-                if(res.rowcount > 0):
-                    self.plainTextEdit.appendPlainText(f'{res.rowcount} thumbnails toegevoegd.')
-            self.progressBar.setValue(66)
 
             """
             IGF
@@ -296,11 +159,51 @@ class winUpdate(QtWidgets.QMainWindow):
                 if(res.rowcount > 0):
                     self.plainTextEdit.appendPlainText(f'{res.rowcount} PDA files toegevoegd.')
             self.insertInfo(conn, (datetime.now().isoformat(), backup_folder))
+            self.progressBar.setValue(33)
+            QtWidgets.QApplication.processEvents()
 
+            """
+            Create dictionary of PDF files
+            """
+            pdf_list = []
+            for n, fn in enumerate(glob.glob(pathPDF + '/**/*.pdf', recursive=True)):
+                pp = PurePath(fn)
+                filename = pp.name
+                found = re.search(r'\d{7,}', filename)
+                if(found is not None):
+                    basename = pp.stem
+                    mm = found.group()
+                    path = pp.parent
+                    pdf_list.append((filename, basename, str(mm), str(path)))
+            res = self.insertPDF(conn, pdf_list)
+            if(res):
+                if(res.rowcount > 0):
+                    self.plainTextEdit.appendPlainText(f'{res.rowcount} PDF files toegevoegd.')
+            self.progressBar.setValue(66)
+            QtWidgets.QApplication.processEvents()
+            
+            """
+            Create dictionary of thumbnails
+            """
+            thumbnail_list = []
+            for n, fn in enumerate(glob.glob(pathThumbnail + '/**/*.jpg', recursive=True)):
+                pp = PurePath(fn)
+                filename = pp.name
+                found = re.search(r'\d{7,}', filename)
+                if(found is not None):
+                    basename = pp.stem
+                    mm = found.group()
+                    path = pp.parent
+                    thumbnail_list.append((filename, basename, str(mm), str(path)))
+            res = self.insertThumbs(conn, thumbnail_list)
+            if(res):
+                if(res.rowcount > 0):
+                    self.plainTextEdit.appendPlainText(f'{res.rowcount} thumbnails toegevoegd.')
+            
             self.progressBar.setValue(100)
             self.plainTextEdit.appendPlainText('Ready')
         else:
-            return self.plainTextEdit.appendPlainText('Error connection database. Try again.')
+            self.plainTextEdit.appendPlainText('Error connection database. Try again.')
         
         self.buttonBox.button(QtWidgets.QDialogButtonBox.StandardButton.Ok).setEnabled(True)
 

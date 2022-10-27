@@ -4,6 +4,8 @@ _bin/
 *.csv
 *.txt
 img/_/
+update_pool.py
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
