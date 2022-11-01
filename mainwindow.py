@@ -1,17 +1,20 @@
-import qdarktheme, sys, os, sqlite3, configparser
+import qdarktheme, sys, os, sqlite3, configparser, uuid
 from sqlite3 import Error
 from pathlib import Path
 from datetime import datetime
 from PyQt6 import QtWidgets, uic
-from PyQt6.QtCore import Qt, QEvent, QCoreApplication
+from PyQt6.QtCore import Qt, QEvent, QCoreApplication, QObject, pyqtSignal, QRunnable, pyqtSlot, QTimer, QThreadPool, QAbstractListModel
 from PyQt6.QtGui import QPixmap, QCursor, QIcon, QFont
 from update import winUpdate
 
 """
 https://www.pythonguis.com/faq/file-image-browser-app-with-thumbnails/
+https://stackoverflow.com/questions/43949947/how-can-i-update-a-table-using-a-qthread
 """
 
 _DEBUG = False
+
+VERSION = 'Version 2.0.0.1 (Nov 2022)'
 
 DATABASE = 'sqlite.db'
 NUMBER_OF_COLUMNS = 10
@@ -42,15 +45,222 @@ try:
 except Exception as e:
     print(e)
 
+def create_connection(db):
+    conn = None
+    try:
+        if(os.path.isfile(os.path.join('.', db))):
+            conn = sqlite3.connect(db)
+    except Error as e:
+        print(e)
+    return conn
+
+STATUS_WAITING = "waiting"
+STATUS_RUNNING = "running"
+STATUS_ERROR = "error"
+STATUS_COMPLETE = "complete"
+
+DEFAULT_STATE = {"progress": 0, "status": STATUS_WAITING}
+
+class WorkerSignals(QObject):
+    """
+    Defines the signals available from a running worker thread.
+
+    Supported signals are:
+
+    finished
+        No data
+    
+    error
+        `tuple` (exctype, value, traceback.format_exc() )
+    
+    result
+        `object` data returned from processing, anything
+
+    progress
+        `int` indicating % progress 
+
+    """
+
+    error = pyqtSignal(str, str)
+    result = pyqtSignal(str, object)
+
+    finished = pyqtSignal(str)
+    progress = pyqtSignal(str, int)
+    status = pyqtSignal(str, str)
+
+
+class Worker(QRunnable):
+    """
+    Worker thread
+
+    Inherits from QRunnable to handle worker thread setup, signals and wrap-up.
+
+    :param args: Arguments to pass for the worker
+    :param kwargs: Keywords to pass for the worker
+
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+
+        # Store constructor arguments (re-used for processing).
+        self.signals = WorkerSignals()
+
+        # Give this job a unique ID.
+        self.job_id = str(uuid.uuid4())
+
+        # The arguments for the worker
+        self.args = args
+        self.kwargs = kwargs
+
+        self.signals.status.emit(self.job_id, STATUS_WAITING)
+
+    @pyqtSlot()
+    def run(self):
+        """
+        Initialize the runner function with passed args, kwargs.
+        """
+        result = []
+
+        try:
+            conn = create_connection(DATABASE)
+
+            cat, = self.args
+            self.signals.status.emit(self.job_id, STATUS_RUNNING)
+
+            cur = conn.cursor()
+            cur.execute(f"""
+                SELECT
+                    igf.basename,
+                    igf.path,
+                    pdf.filename,
+                    pdf.path,
+                    thumbs.filename,
+                    thumbs.path
+                FROM
+                    igf
+                LEFT JOIN
+                    pdf
+                ON
+                    igf.mm = pdf.mm
+                LEFT JOIN
+                    thumbs
+                ON
+                    igf.mm = thumbs.mm
+                WHERE
+                    igf.cat = '{cat}'
+                GROUP BY
+                    igf.mm
+            """)
+
+            result.append(cur.fetchall())
+
+            self.signals.progress.emit(self.job_id, 1)
+        except Exception as e:
+            print(e)
+            # We swallow the error and continue.
+            self.signals.error.emit(self.job_id, str(e))
+            self.signals.status.emit(self.job_id, STATUS_ERROR)
+
+        else:
+            self.signals.result.emit(self.job_id, result)
+            self.signals.status.emit(self.job_id, STATUS_COMPLETE)
+
+        self.signals.finished.emit(self.job_id)
+
+class WorkerManager(QAbstractListModel):
+    """
+    Manager to handle our worker queues and state.
+    Also functions as a Qt data model for a view
+    displaying progress for each worker.
+
+    """
+
+    _workers = {}
+    _state = {}
+
+    status = pyqtSignal(str)
+
+    def __init__(self):
+        super().__init__()
+
+        # Create a threadpool for our workers.
+        self.threadpool = QThreadPool()
+        # self.threadpool.setMaxThreadCount(1)
+        self.max_threads = self.threadpool.maxThreadCount()
+        # print("Multithreading with maximum %d threads" % self.max_threads)
+
+        self.status_timer = QTimer()
+        self.status_timer.setInterval(100)
+        self.status_timer.timeout.connect(self.notify_status)
+        self.status_timer.start()
+
+    def notify_status(self):
+        n_workers = len(self._workers)
+        running = min(n_workers, self.max_threads)
+        waiting = max(0, n_workers - self.max_threads)
+        self.status.emit(
+            "{} running, {} waiting, {} threads".format(
+                running, waiting, self.max_threads
+            )
+        )
+
+    def enqueue(self, worker):
+        """
+        Enqueue a worker to run (at some point) by passing it to the QThreadPool.
+        """
+        worker.signals.error.connect(self.receive_error)
+        worker.signals.status.connect(self.receive_status)
+        worker.signals.progress.connect(self.receive_progress)
+        worker.signals.finished.connect(self.done)
+
+        self.threadpool.start(worker)
+        self._workers[worker.job_id] = worker
+
+        # Set default status to waiting, 0 progress.
+        self._state[worker.job_id] = DEFAULT_STATE.copy()
+
+        self.layoutChanged.emit()
+
+    def receive_status(self, job_id, status):
+        self._state[job_id]["status"] = status
+        self.layoutChanged.emit()
+
+    def receive_progress(self, job_id, progress):
+        self._state[job_id]["progress"] = progress
+        self.layoutChanged.emit()
+
+    def receive_error(self, job_id, message):
+        print(job_id, message)
+
+    def done(self, job_id):
+        """
+        Task/worker complete. Remove it from the active workers
+        dictionary. We leave it in worker_state, as this is used to
+        to display past/complete workers too.
+        """
+        del self._workers[job_id]
+        self.layoutChanged.emit()
+
+    def cleanup(self):
+        """
+        Remove any complete/failed workers from worker_state.
+        """
+        for job_id, s in list(self._state.items()):
+            if s["status"] in (STATUS_COMPLETE, STATUS_ERROR):
+                del self._state[job_id]
+        self.layoutChanged.emit()
+
 class MainWindow(QtWidgets.QMainWindow):
 
     def __init__(self):
         super(MainWindow,self).__init__()
         uic.loadUi(os.path.join(os.path.dirname(__file__), 'mainwindow.ui'), self)
 
+        self.workers = WorkerManager()
+
         self.tableWidget.horizontalHeader().setDefaultSectionSize(CELLSIZE_WIDTH)
         self.tableWidget.verticalHeader().setDefaultSectionSize(CELLSIZE_HEIGHT)
-        # self.tableWidget.clicked.connect(self.cellClicked)
         self.tableWidget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tableWidget.customContextMenuRequested.connect(self.contextMenu)
         self.tableWidget.setStyleSheet("QTableWidget::item{background:transparent}")
@@ -63,7 +273,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.listWidget.itemClicked.connect(self.categoryItem)
 
         try:
-            conn = self.create_connection(DATABASE)
+            conn = create_connection(DATABASE)
             if conn:
                 self.showCategories(conn)
                 info = self.getInfo(conn)
@@ -76,35 +286,12 @@ class MainWindow(QtWidgets.QMainWindow):
             self.statusbar.showMessage('Er is een fout opgetreden.')
             print(e)
 
-    def showItems(self, conn, cat):
+    def display_result(self, job_id, data):
         self.tableWidget.setColumnCount(NUMBER_OF_COLUMNS)
         self.tableWidget.setRowCount(0)
         curColumn = 0
-        cur = conn.cursor()
-        cur.execute(f"""
-            SELECT
-                igf.basename,
-                igf.path,
-                pdf.filename,
-                pdf.path,
-                thumbs.filename,
-                thumbs.path
-            FROM
-                igf
-            LEFT JOIN
-                pdf
-            ON
-                igf.mm = pdf.mm
-            LEFT JOIN
-                thumbs
-            ON
-                igf.mm = thumbs.mm
-            WHERE
-                igf.cat = '{cat}'
-            GROUP BY
-                igf.mm
-        """)
-        for row in cur.fetchall():
+
+        for row in data[0]:
             igf_basename = row[0]
             igf_path = row[1]
             pdf_filename = row[2]
@@ -133,22 +320,16 @@ class MainWindow(QtWidgets.QMainWindow):
         cur.execute("SELECT last_updated, folder FROM info")
         return cur.fetchone()
 
-    def create_connection(self, db):
-        conn = None
-        try:
-            if(os.path.isfile(os.path.join('.', db))):
-                conn = sqlite3.connect(db)
-        except Error as e:
-            print(e)
-        return conn
-
     def categoryItem(self, item):
         if item:
-            conn = self.create_connection(DATABASE)
+            conn = create_connection(DATABASE)
             if conn:
                 cat = item.text()
                 self.statusbar.showMessage(cat)
-                self.showItems(conn, cat)
+                w = Worker(cat)
+                w.signals.result.connect(self.display_result)
+                w.signals.error.connect(self.display_result)
+                self.workers.enqueue(w)
                 conn.close()
             else:
                 self.statusbar.showMessage('Kan geen verbinding maken.')
@@ -238,8 +419,8 @@ class MainWindow(QtWidgets.QMainWindow):
         dlg.setIcon(QtWidgets.QMessageBox.Icon.Information)
         dlg.setWindowTitle("About")
         dlg.setTextFormat(Qt.TextFormat.RichText)
-        dlg.setText("""<p>Okuma IGF Viewer
-        <br>Version 2.0.0 (Oct 2022)</p>
+        dlg.setText(f"""<p>Okuma IGF Viewer
+        <br>{VERSION}</p>
         <p>
         © Michael van Druten
         <br><a style='color:lightblue' href='mailto:info@turmin.com?Subject=Okuma%20IGF%20Viewer'>info@turmin.com</a>

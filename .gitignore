@@ -5,6 +5,7 @@ _bin/
 *.txt
 img/_/
 update_pool.py
+*.db
 
 
 # Byte-compiled / optimized / DLL files
