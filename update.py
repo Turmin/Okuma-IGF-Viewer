@@ -529,7 +529,7 @@ class winUpdate(QtWidgets.QMainWindow):
             event.ignore()
 
 app = QtWidgets.QApplication(sys.argv)
-app.setStyleSheet(qdarktheme.load_stylesheet(border="sharp"))
+app.setStyleSheet(qdarktheme.load_stylesheet(corner_shape="sharp"))
 window = winUpdate()
 """===============
 For developing

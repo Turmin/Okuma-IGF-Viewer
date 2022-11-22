@@ -410,23 +410,21 @@ class MainWindow(QtWidgets.QMainWindow):
         dlg.setWindowTitle("Oops!")
         dlg.setText(msg)
         button = dlg.exec()
+        
     def openWinUpdate(self):
         self.winUpdate = winUpdate()
         self.winUpdate.show()
 
     def about(self):
-        dlg = QtWidgets.QMessageBox(self)
-        dlg.setIcon(QtWidgets.QMessageBox.Icon.Information)
-        dlg.setWindowTitle("About")
-        dlg.setTextFormat(Qt.TextFormat.RichText)
-        dlg.setText(f"""<p>Okuma IGF Viewer
-        <br>{VERSION}</p>
-        <p>
-        © Michael van Druten
-        <br><a style='color:lightblue' href='mailto:info@turmin.com?Subject=Okuma%20IGF%20Viewer'>info@turmin.com</a>
-        </p>
-        """)
-        button = dlg.exec()
+        QtWidgets.QMessageBox.about(self, 'About', f"""
+            <p>Okuma IGF Viewer
+            <br>{VERSION}</p>
+            <p>
+            © Michael van Druten
+            <br><a style='color:lightblue' href='mailto:info@turmin.com?Subject=Okuma%20IGF%20Viewer'>info@turmin.com</a>
+            </p>
+            """
+        )
 
 class cellWidgets(QtWidgets.QWidget):
 
@@ -491,7 +489,7 @@ class cellWidgets(QtWidgets.QWidget):
             print(e)
 
 app = QtWidgets.QApplication(sys.argv)
-app.setStyleSheet(qdarktheme.load_stylesheet(border="sharp"))
+app.setStyleSheet(qdarktheme.load_stylesheet(corner_shape="sharp"))
 window = MainWindow()
 window.showMaximized()
 app.exec()
