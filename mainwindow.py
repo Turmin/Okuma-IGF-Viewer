@@ -490,7 +490,7 @@ class cellWidgets(QtWidgets.QWidget):
 
 app = QtWidgets.QApplication(sys.argv)
 # app.setStyleSheet(qdarktheme.load_stylesheet(corner_shape="sharp"))
-app.setStyleSheet(qdarktheme.load_stylesheet(border="sharp"))
+app.setStyleSheet(qdarktheme.load_stylesheet(corner_shape="sharp"))
 window = MainWindow()
 window.showMaximized()
 app.exec()
