@@ -3,9 +3,12 @@ Scripts/
 _bin/
 *.csv
 *.txt
+!requirements*.txt
+!okuma_igf_viewer/assets/icons/LICENSE.txt
 img/_/
 update_pool.py
 *.db
+*.db.new
 
 
 # Byte-compiled / optimized / DLL files
