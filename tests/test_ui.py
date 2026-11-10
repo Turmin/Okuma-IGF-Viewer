@@ -106,3 +106,38 @@ def test_update_window_rebuilds_database_and_reports(app, home, source_folders):
     assert "Done: 3 IGF programs, 1 PDF files and 2 thumbnails." in window._log.toPlainText()
     assert "Backup 2026-01-01" in (home / "conf.ini").read_text()
     window.close()
+
+
+def test_edit_details_updates_cards_tooltip_and_search(app, home, preferences, source_folders, monkeypatch):
+    from okuma_igf_viewer import metadata
+    from okuma_igf_viewer.ui import details_dialog
+    from okuma_igf_viewer.ui.main_window import MainWindow
+    from okuma_igf_viewer.ui.thumbnail_grid import tooltip
+
+    igf, pdf, thumbnails = source_folders
+    indexer.rebuild(home / "sqlite.db", str(igf), str(pdf), str(thumbnails))
+    window = MainWindow(preferences)
+    window.resize(1200, 800)
+    window.show()
+    wait_until(lambda: window._model.rowCount() == 2)
+    item = window._model.items()[0]
+    assert "Press F2" in tooltip(item)
+
+    def fake_exec(dialog):
+        dialog._title.setText("Drive <shaft>")
+        dialog._tags.setText("steel, M12")
+        dialog._description.setPlainText("Turn first")
+        return details_dialog.DetailsDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(details_dialog.DetailsDialog, "exec", fake_exec)
+    window.edit_details(item)
+
+    updated = window._model.items()[0]
+    assert updated.label == "Drive <shaft>" and updated.tags == ("steel", "M12")
+    text = tooltip(updated)
+    assert "Drive &lt;shaft&gt;" in text and "#steel" in text and "Turn first" in text
+    assert metadata.load(home / "metadata.db", item.drawing_number).title == "Drive <shaft>"
+
+    window._search.setText("m12")
+    wait_until(lambda: [i.drawing_number for i in window._model.items()] == [item.drawing_number])
+    window.close()

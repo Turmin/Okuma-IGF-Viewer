@@ -40,3 +40,8 @@ def config_file() -> Path:
 
 def database_file() -> Path:
     return app_dir() / "sqlite.db"
+
+
+def metadata_file() -> Path:
+    """Titles, tags and descriptions; kept apart so a database update never removes them."""
+    return app_dir() / "metadata.db"

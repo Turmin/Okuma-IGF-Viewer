@@ -30,9 +30,9 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from .. import APP_NAME, __version__, database, icons, theme
+from .. import APP_NAME, __version__, database, icons, metadata, theme
 from ..database import Item
-from ..paths import database_file
+from ..paths import database_file, metadata_file
 from ..settings import Preferences
 from .thumbnail_grid import ItemModel, ThumbnailGrid
 
@@ -58,7 +58,7 @@ class _QueryTask(QRunnable):
         items: list[Item] = []
         error = ""
         try:
-            with closing(database.connect(self._file, readonly=True)) as connection:
+            with closing(database.connect(self._file, readonly=True, metadata_file=metadata_file())) as connection:
                 if self._search:
                     items = database.search_items(connection, self._search)
                 elif self._category is not None:
@@ -164,7 +164,7 @@ class MainWindow(QMainWindow):
         self.addToolBar(toolbar)
 
         self._search = QLineEdit()
-        self._search.setPlaceholderText("Search all categories by name or drawing number")
+        self._search.setPlaceholderText("Search name, number, title, tag or description")
         self._search.setClearButtonEnabled(True)
         self._search.setMinimumWidth(260)
         self._search.setMaximumWidth(460)
@@ -213,6 +213,7 @@ class MainWindow(QMainWindow):
         self._grid.setModel(self._model)
         self._grid.pdfRequested.connect(self._open_pdf)
         self._grid.imageRequested.connect(self._open_thumbnail)
+        self._grid.editRequested.connect(self.edit_details)
         self._grid.zoomRequested.connect(self._zoom)
         self._grid.customContextMenuRequested.connect(self._show_context_menu)
 
@@ -312,7 +313,7 @@ class MainWindow(QMainWindow):
 
         database.ensure_indexes(file)
         try:
-            with closing(database.connect(file, readonly=True)) as connection:
+            with closing(database.connect(file, readonly=True, metadata_file=metadata_file())) as connection:
                 categories = database.categories(connection)
                 info = database.info(connection)
         except (sqlite3.Error, OSError) as error:
@@ -477,6 +478,10 @@ class MainWindow(QMainWindow):
         open_image.setEnabled(bool(item.thumbnail))
         open_image.triggered.connect(lambda: self._open_thumbnail(item))
         menu.addSeparator()
+        menu.addAction(icons.icon("pencil"), "Edit details…\tF2").triggered.connect(
+            lambda: self.edit_details(item)
+        )
+        menu.addSeparator()
         show_igf = menu.addAction(icons.icon("folder-open"), "Show IGF program in folder")
         show_igf.setEnabled(bool(item.igf_file))
         show_igf.triggered.connect(lambda: self._show_in_folder(item.igf_file))
@@ -486,6 +491,22 @@ class MainWindow(QMainWindow):
         )
         menu.addAction(icons.icon("copy"), "Copy program name").triggered.connect(lambda: self._copy(item.name))
         menu.exec(self._grid.viewport().mapToGlobal(position))
+
+    def edit_details(self, item: Item) -> None:
+        from .details_dialog import DetailsDialog
+
+        file = metadata_file()
+        current = metadata.Details(item.title, item.description, item.tags)
+        dialog = DetailsDialog(item, current, self)
+        if dialog.exec() != DetailsDialog.DialogCode.Accepted:
+            return
+        try:
+            saved = metadata.save(file, item.drawing_number, dialog.details())
+        except (sqlite3.Error, OSError) as error:
+            QMessageBox.warning(self, APP_NAME, f"The details could not be saved.\n\n{error}")
+            return
+        self._model.set_details(item.drawing_number, saved)
+        self.statusBar().showMessage(f"Saved details for {item.drawing_number}", 3000)
 
     # ----- windows ------------------------------------------------------
 

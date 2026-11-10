@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from . import metadata
+
 SCHEMA = (
     """CREATE TABLE IF NOT EXISTS igf (
         id INTEGER PRIMARY KEY,
@@ -50,10 +52,12 @@ INDEXES = (
 _ITEM_QUERY = """
     SELECT
         igf.basename, igf.filename, igf.path, igf.mm, igf.cat, igf.modified,
-        pdf.path, pdf.filename, thumbs.path, thumbs.filename
+        pdf.path, pdf.filename, thumbs.path, thumbs.filename,
+        meta.metadata.title, meta.metadata.description, meta.metadata.tags
     FROM igf
     LEFT JOIN pdf ON igf.mm = pdf.mm
     LEFT JOIN thumbs ON igf.mm = thumbs.mm
+    LEFT JOIN meta.metadata ON igf.mm = meta.metadata.mm
     WHERE {where}
     GROUP BY igf.cat, igf.mm
     ORDER BY igf.basename COLLATE NOCASE
@@ -71,6 +75,18 @@ class Item:
     modified: str | None
     pdf: str | None
     thumbnail: str | None
+    title: str = ""
+    description: str = ""
+    tags: tuple[str, ...] = ()
+
+    @property
+    def label(self) -> str:
+        """What the card shows: the title when there is one, otherwise the program name."""
+        return self.title or self.name
+
+    @property
+    def has_details(self) -> bool:
+        return bool(self.title or self.description or self.tags)
 
 
 @dataclass(frozen=True)
@@ -85,12 +101,21 @@ def _join(path: str | None, filename: str | None) -> str | None:
     return os.path.join(path, filename)
 
 
-def connect(file: Path, *, readonly: bool = False) -> sqlite3.Connection:
-    """Open the database. Raises FileNotFoundError when a read-only database is missing."""
+def connect(file: Path, *, readonly: bool = False, metadata_file: Path | None = None) -> sqlite3.Connection:
+    """Open the database. Raises FileNotFoundError when a read-only database is missing.
+
+    A read-only connection also gets the metadata file attached (see metadata.attach).
+    """
     if readonly:
         if not Path(file).is_file():
             raise FileNotFoundError(file)
-        return sqlite3.connect(f"{Path(file).as_uri()}?mode=ro", uri=True)
+        connection = sqlite3.connect(f"{Path(file).as_uri()}?mode=ro", uri=True)
+        try:
+            metadata.attach(connection, metadata_file)
+        except sqlite3.Error:
+            connection.close()
+            raise
+        return connection
     return sqlite3.connect(file)
 
 
@@ -140,9 +165,13 @@ def _items(connection: sqlite3.Connection, where: str, parameters: tuple) -> lis
             modified=modified,
             pdf=_join(pdf_path, pdf_filename),
             thumbnail=_join(thumb_path, thumb_filename),
+            title=title or "",
+            description=description or "",
+            tags=metadata.parse_tags(tags or ""),
         )
         for (name, igf_filename, igf_path, mm, category, modified,
-             pdf_path, pdf_filename, thumb_path, thumb_filename) in rows
+             pdf_path, pdf_filename, thumb_path, thumb_filename,
+             title, description, tags) in rows
     ]
 
 
@@ -150,15 +179,29 @@ def items_in_category(connection: sqlite3.Connection, category: str) -> list[Ite
     return _items(connection, "igf.cat = ?", (category,))
 
 
+_SEARCH_FIELDS = (
+    "igf.basename",
+    "igf.mm",
+    "meta.metadata.title",
+    "meta.metadata.description",
+    "meta.metadata.tags",
+)
+
+
 def search_items(connection: sqlite3.Connection, text: str) -> list[Item]:
-    """Programs in any category whose name or drawing number contains the text."""
-    escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    pattern = f"%{escaped}%"
-    return _items(
-        connection,
-        "(igf.basename LIKE ? ESCAPE '\\' OR igf.mm LIKE ? ESCAPE '\\')",
-        (pattern, pattern),
-    )
+    """Programs in any category that match every word of the text.
+
+    A word matches when it is part of the program name, drawing number, title, description or tags.
+    """
+    terms = text.split()
+    if not terms:
+        return []
+    clauses, parameters = [], []
+    for term in terms:
+        escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        clauses.append("(" + " OR ".join(f"{field} LIKE ? ESCAPE '\\'" for field in _SEARCH_FIELDS) + ")")
+        parameters.extend([f"%{escaped}%"] * len(_SEARCH_FIELDS))
+    return _items(connection, " AND ".join(clauses), tuple(parameters))
 
 
 def info(connection: sqlite3.Connection) -> DatabaseInfo | None:
