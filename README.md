@@ -9,9 +9,10 @@ Okuma IGF Viewer makes the programs on an Okuma machine easy to recognise. IGF p
 ## What you can do with it
 
 - **Browse per category.** The categories are the folders of the IGF backup. Each one shows how many programs it holds.
-- **Recognise a program at a glance.** Every program is a card with the thumbnail of its drawing and the program name.
+- **Recognise a program at a glance.** Every program is a card with the thumbnail of its drawing and the program name. The grey background of the 3D renderings is removed and the empty space around the part is cropped, so the part fills the card.
 - **Open the drawing.** A blue name bar means a PDF was found. Click the bar to open the PDF; click the thumbnail to open the image.
-- **Search everywhere.** The search field looks through all categories by program name or drawing number.
+- **Search everywhere.** The search field looks through all categories by program name, drawing number, title, tags and description. Every word you type has to match, so `shaft steel` finds programs that have both.
+- **Add details.** Give a drawing number a title, tags and a description: press `F2` on a card or use right-click → **Edit details…**. A card with details shows a small info marker and the title instead of the program name. Hover a card to see the title, tags, description and file information.
 - **Resize to taste.** Change the thumbnail size with the slider, `Ctrl` + mouse wheel or `Ctrl` `+` / `Ctrl` `-`. The number of columns follows the width of the window.
 - **Work from the right-click menu.** Open the PDF or thumbnail, show the IGF program in Explorer, or copy the drawing number or program name.
 - **Choose a theme.** Dark, light, or the same as Windows (View → Theme).
@@ -20,6 +21,7 @@ Okuma IGF Viewer makes the programs on an Okuma machine easy to recognise. IGF p
 | --- | --- |
 | `Ctrl` `F` | Search |
 | `Enter` | Open the PDF of the selected program |
+| `F2` | Edit the details of the selected program |
 | `Ctrl` `+` / `Ctrl` `-` / `Ctrl` `0` | Larger / smaller / default thumbnails |
 | `Ctrl` `U` | Update database |
 | `Ctrl` `D` | Database viewer |
@@ -52,6 +54,7 @@ The folders are scanned in the background and the progress is shown in the windo
 | --- | --- |
 | `conf.ini` | The three source folders. Written by the update window; shared by everyone who uses this copy of the program. |
 | `sqlite.db` | The database. |
+| `metadata.db` | Titles, tags and descriptions. Separate from `sqlite.db`, so updating the database never removes them. Back it up like any other file you care about. |
 | `sqlite.backup.db` | The database from before the last update. |
 
 Window size, thumbnail size and theme are personal and are stored per Windows user, not in `conf.ini`. The layout settings that older versions kept in `conf.ini` (`numberofcolumns`, `cellsize_*`, `cellmargin`) are no longer used: the grid scales with the window.
@@ -67,12 +70,15 @@ okuma_igf_viewer/
     paths.py                Where conf.ini, the database and the assets live
     settings.py             conf.ini folders and per-user preferences
     database.py             Schema and queries
+    metadata.py             Titles, tags and descriptions (metadata.db)
+    thumbnails.py           Removes the background gradient and crops thumbnails
     indexer.py              Scans the folders and builds the database
     theme.py                Dark and light appearance
     icons.py                SVG icons tinted for the active theme
     ui/
         main_window.py      Categories, search, toolbar and menus
         thumbnail_grid.py   The card grid and background thumbnail loading
+        details_dialog.py   Edit details window
         update_window.py    Update database window
         database_viewer.py  Read-only table viewer
     assets/                 Application icon and Lucide icons
@@ -90,6 +96,7 @@ To publish a new version, raise `__version__` in `okuma_igf_viewer/__init__.py` 
 | --- | --- |
 | Python | 3.14 |
 | PyQt6 | 6.12.0 |
+| NumPy | 2.5.4 |
 | PyInstaller | 6.22.3 |
 
 ## Credits

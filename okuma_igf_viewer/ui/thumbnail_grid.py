@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import dataclasses
 from collections import OrderedDict
 from enum import Enum
+from html import escape
 
 from PyQt6.QtCore import (
     QAbstractListModel,
@@ -20,13 +22,15 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import QColor, QFontMetrics, QImage, QImageReader, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import QAbstractItemView, QListView, QStyle, QStyledItemDelegate
 
-from .. import icons, theme
+from .. import icons, metadata, theme, thumbnails
 from ..database import Item
 
 ITEM_ROLE = Qt.ItemDataRole.UserRole
 THUMBNAIL_ROLE = Qt.ItemDataRole.UserRole + 1
 
-# Thumbnails are decoded once at this size and scaled down while painting.
+# Thumbnails are read at up to READ_EDGE, cleaned up and cropped, and kept at up to DECODE_EDGE.
+# They are scaled down further while painting.
+READ_EDGE = 1024
 DECODE_EDGE = 512
 CACHE_LIMIT = 600
 
@@ -57,9 +61,16 @@ class _LoadTask(QRunnable):
         reader = QImageReader(self._path)
         reader.setAutoTransform(True)
         size = reader.size()
-        if size.isValid() and max(size.width(), size.height()) > DECODE_EDGE:
-            reader.setScaledSize(size.scaled(DECODE_EDGE, DECODE_EDGE, Qt.AspectRatioMode.KeepAspectRatio))
-        image = reader.read()
+        if size.isValid() and max(size.width(), size.height()) > READ_EDGE:
+            reader.setScaledSize(size.scaled(READ_EDGE, READ_EDGE, Qt.AspectRatioMode.KeepAspectRatio))
+        image = thumbnails.tidy(reader.read())
+        if max(image.width(), image.height()) > DECODE_EDGE:
+            image = image.scaled(
+                DECODE_EDGE,
+                DECODE_EDGE,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
         try:
             self._signals.loaded.emit(self._path, image)
         except RuntimeError:
@@ -94,6 +105,16 @@ class ItemModel(QAbstractListModel):
     def items(self) -> list[Item]:
         return self._items
 
+    def set_details(self, drawing_number: str, details: metadata.Details) -> None:
+        """Show new details on every card with this drawing number."""
+        for row, item in enumerate(self._items):
+            if item.drawing_number == drawing_number:
+                self._items[row] = dataclasses.replace(
+                    item, title=details.title, description=details.description, tags=details.tags
+                )
+                index = self.index(row)
+                self.dataChanged.emit(index, index)
+
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
         return 0 if parent.isValid() else len(self._items)
 
@@ -108,11 +129,7 @@ class ItemModel(QAbstractListModel):
         if role == THUMBNAIL_ROLE:
             return self._thumbnail(item)
         if role == Qt.ItemDataRole.ToolTipRole:
-            lines = [item.name, f"Drawing number: {item.drawing_number}", f"Category: {item.category}"]
-            if item.modified:
-                lines.append(f"Modified: {item.modified[:10]}")
-            lines.append("PDF available" if item.pdf else "No PDF found")
-            return "\n".join(lines)
+            return tooltip(item)
         return None
 
     def thumbnail_state(self, item: Item) -> str:
@@ -148,6 +165,36 @@ class ItemModel(QAbstractListModel):
     def shutdown(self) -> None:
         self._pool.clear()
         self._pool.waitForDone(2000)
+
+
+DESCRIPTION_LIMIT = 400
+
+
+def tooltip(item: Item) -> str:
+    """Rich text shown when hovering a card: title, tags, description and the file details."""
+    colors = theme.current()
+    muted = f"color:{colors.text_muted}"
+    parts = [f"<b style='font-size:11pt'>{escape(item.label)}</b>"]
+    if item.title:
+        parts.append(f"<span style='{muted}'>{escape(item.name)}</span>")
+    if item.tags:
+        chips = "&nbsp; ".join(
+            f"<span style='color:{colors.accent}'>#{escape(tag)}</span>" for tag in item.tags
+        )
+        parts.append(chips)
+    if item.description:
+        text = item.description
+        if len(text) > DESCRIPTION_LIMIT:
+            text = text[:DESCRIPTION_LIMIT].rstrip() + "…"
+        parts.append(escape(text).replace("\n", "<br>"))
+    facts = [f"Drawing {escape(item.drawing_number)}", escape(item.category)]
+    if item.modified:
+        facts.append(f"modified {escape(item.modified[:10])}")
+    facts.append("PDF available" if item.pdf else "no PDF")
+    parts.append(f"<span style='{muted}'>{' · '.join(facts)}</span>")
+    if not item.has_details:
+        parts.append(f"<span style='{muted}'>Press F2 to add a title, tags or a description.</span>")
+    return f"<div style='max-width:340px'>{'<br>'.join(parts)}</div>"
 
 
 def card_size(thumbnail_size: int) -> QSize:
@@ -209,7 +256,10 @@ class CardDelegate(QStyledItemDelegate):
         painter.setBrush(QColor(colors.surface_hover if hovered else colors.surface))
         painter.drawRoundedRect(card.adjusted(1, 1, -1, -1), CARD_RADIUS, CARD_RADIUS)
 
-        self._paint_image(painter, index, item, image_rect(card, size), colors)
+        area = image_rect(card, size)
+        self._paint_image(painter, index, item, area, colors)
+        if item.has_details:
+            self._paint_badge(painter, area)
         self._paint_footer(painter, option, item, footer_rect(card), colors)
         painter.restore()
 
@@ -244,6 +294,19 @@ class CardDelegate(QStyledItemDelegate):
             QRect(area.center().x() - edge // 2, area.center().y() - edge // 2, edge, edge), placeholder
         )
 
+    def _paint_badge(self, painter, area: QRect) -> None:
+        """A small marker for cards that have a title, tags or a description."""
+        edge = 20
+        badge = QRect(area.right() - edge - 4, area.y() + 4, edge, edge)
+        painter.save()
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(0, 0, 0, 150))
+        painter.drawEllipse(badge)
+        ratio = painter.device().devicePixelRatioF() if painter.device() else 1.0
+        glyph = icons.pixmap("info", "#ffffff", int(12 * ratio))
+        painter.drawPixmap(QRect(badge.x() + 4, badge.y() + 4, 12, 12), glyph)
+        painter.restore()
+
     def _paint_footer(self, painter, option, item, area: QRect, colors) -> None:
         has_pdf = bool(item.pdf)
         text_rect = area.adjusted(10, 0, -10, 0)
@@ -259,7 +322,7 @@ class CardDelegate(QStyledItemDelegate):
         else:
             painter.setPen(QColor(colors.text_muted))
         metrics = QFontMetrics(option.font)
-        text = metrics.elidedText(item.name, Qt.TextElideMode.ElideMiddle, text_rect.width())
+        text = metrics.elidedText(item.label, Qt.TextElideMode.ElideMiddle, text_rect.width())
         alignment = Qt.AlignmentFlag.AlignVCenter | (
             Qt.AlignmentFlag.AlignLeft if has_pdf else Qt.AlignmentFlag.AlignHCenter
         )
@@ -271,6 +334,7 @@ class ThumbnailGrid(QListView):
     """Wrapping grid of cards. The number of columns follows the window width."""
 
     pdfRequested = pyqtSignal(object)
+    editRequested = pyqtSignal(object)
     imageRequested = pyqtSignal(object)
     zoomRequested = pyqtSignal(int)
 
@@ -371,6 +435,11 @@ class ThumbnailGrid(QListView):
             self.imageRequested.emit(item)
 
     def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key.Key_F2:
+            item = self.current_item()
+            if item is not None:
+                self.editRequested.emit(item)
+                return
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             item = self.current_item()
             if item is not None:
