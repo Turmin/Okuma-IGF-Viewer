@@ -84,7 +84,7 @@ tools/make_icon.py          Regenerates the .ico from app.svg
 
 The **Build executable** workflow runs on every push to `main` and on every pull request. It runs the tests on Windows, builds a single `Okuma-IGF-Viewer.exe` with PyInstaller, checks that it starts and stores it as a workflow artifact.
 
-Pushing a tag such as `v2.1.0` also publishes a GitHub release with the executable attached. The tag has to match the version in `okuma_igf_viewer/__init__.py`.
+To publish a new version, raise `__version__` in `okuma_igf_viewer/__init__.py` and merge to `main`. The workflow then creates the release `v<version>` with the executable attached and generated release notes. A version that already has a release is left alone, so ordinary merges do not publish anything. Pushing a tag such as `v2.1.0` still works too; the tag has to match the version in the code.
 
 | Component | Version |
 | --- | --- |
